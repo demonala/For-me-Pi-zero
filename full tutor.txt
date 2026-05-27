@@ -1,0 +1,153 @@
+
+```markdown
+# MERETA ALPHA - DOCUMENTATION
+## Full Setup Guide for Raspberry Pi Zero W
+
+---
+
+### STEP 1 - FLASH OS TO MICRO SD (via Laptop/PC)
+
+**Tools:** Laptop + Raspberry Pi Imager
+
+1. Download Raspberry Pi Imager from https://www.raspberrypi.com/software/
+2. Insert micro SD to laptop (via card reader)
+3. Open Imager:
+   - Device: Raspberry Pi Zero W
+   - OS: Raspberry Pi OS Lite (32-bit)
+   - Storage: micro SD
+4. Click gear icon (⚙):
+   - Enable SSH with password
+   - Set WiFi: SSID & password
+   - Set country: MY
+5. Click WRITE (wait 5-10 min)
+
+---
+
+### STEP 2 - BOOT & FIND IP
+
+1. Insert micro SD to Pi Zero W
+2. Connect power (micro USB to powerbank)
+3. Wait 2-3 minutes
+4. From Termux: `nmap -sn 192.168.1.0/24`
+5. Find Pi IP (raspberrypi or mereta)
+
+---
+
+### STEP 3 - SSH TO PI (from Termux)
+
+```bash
+ssh pi@192.168.1.xxx
+password: raspberry
+```
+
+---
+
+STEP 4 - INSTALL DEPENDENCIES (run on Pi)
+
+```bash
+sudo apt update
+sudo apt install -y python3-pip aircrack-ng bluez bluez-tools dnsmasq hostapd
+sudo pip3 install requests
+```
+
+---
+
+STEP 5 - UPLOAD SCRIPT
+
+From Termux (before SSH):
+
+```bash
+scp mereta_alpha.py pi@192.168.1.xxx:/home/pi/
+```
+
+Or direct on Pi:
+
+```bash
+nano mereta_alpha.py
+# paste script content
+# Ctrl+X, Y, Enter
+```
+
+---
+
+STEP 6 - RUN WEB PANEL
+
+```bash
+sudo python3 mereta_alpha.py
+```
+
+Access from phone browser: http://192.168.1.xxx:8080
+
+---
+
+STEP 7 - AUTOSTART (optional)
+
+```bash
+sudo nano /etc/systemd/system/mereta.service
+```
+
+Content:
+
+```
+[Unit]
+Description=Mereta Alpha
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/mereta_alpha.py
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable:
+
+```bash
+sudo systemctl enable mereta.service
+sudo systemctl start mereta.service
+```
+
+---
+
+ATTACK MENU (from web panel)
+
+Button Function
+Deauth Flood Kill all WiFi in range
+Beacon Flood Flood with fake APs
+Channel Hop Hop all channels
+Bluetooth Jam Disrupt Bluetooth devices
+Scan Networks List nearby WiFi
+Scan Devices List devices on network
+
+---
+
+TROUBLESHOOTING
+
+Problem Solution
+Can't SSH Check ssh file in boot partition
+No IP found Check router DHCP list
+Permission denied Use sudo
+WiFi not connecting Check wpa_supplicant.conf
+
+---
+
+HARDWARE LIST
+
+Item Required
+Raspberry Pi Zero W Yes
+Micro SD 16GB+ Yes
+Powerbank 5V 2A Yes
+Micro USB cable Yes
+Laptop/PC (for flashing) Yes
+Card reader If laptop no micro SD slot
+
+---
+
+END OF DOCUMENTATION
+
+```
+
+---
+
