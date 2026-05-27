@@ -1,0 +1,43 @@
+install
+https://www.raspberrypi.com/software/
+
+insert micro sd card into card reader
+and then insert to the laptop
+
+click raspberry pi imager
+
+choose device
+Rasberry Pi Zero W
+
+
+chose os
+Raspberry Pi OS
+
+
+
+chose to the micro sd storage
+
+
+click the gear icon 
+☑ Set hostname: mereta 
+☑ Enable SSH → ☑ Allow password authentication
+☑ Set username and password:
+    Username: pi
+    Password: raspberry
+☑ Configure wireless LAN:
+    SSID: LTE-WIFI_A6A9
+    Password: Butiza16
+    Wireless LAN country: MY
+☑ Set locale settings:
+    Time zone: Asia/Kuala_Lumpur
+    Keyboard layout: us
+
+    SAVE
+
+
+
+Click write 
+
+
+    click yes
+    clik continue 
