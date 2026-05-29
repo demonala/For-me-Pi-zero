@@ -1,0 +1,11 @@
+# Copy script MRT-LITE ke Pi
+# Via SCP atau copy manual
+
+# Install semua dependencies
+sudo apt update
+sudo apt install -y hostapd dnsmasq dsniff bluez bluez-tools python3-pip wireless-tools net-tools iproute2 arp-scan nmap iw rfkill
+pip3 install requests
+
+# Matikan service bawaan (biar gak konflik)
+sudo systemctl disable hostapd
+sudo systemctl disable dnsmasq
